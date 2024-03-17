@@ -3,28 +3,64 @@
 #include <libavformat/avformat.h>  
 #include <libavcodec/avcodec.h>
 #include "video_decoder.h"
-Frame resize_ave(Frame frame,int STRIDE){//水平和垂直改变程度
-    Frame output;
-    int temp1,temp2,temp3;
-    output.height=frame.height/STRIDE;//
-    output.width=frame.width/STRIDE;
-    output.linesize=frame.linesize/STRIDE;
-    for(int i=0;i<frame.height;i+=STRIDE){//i标记行数
-        for(int j=0;j<frame.width;j+=STRIDE){//j跟踪每一行的元素,j对output进行标记，j*3为原序列的索引
-            for(int q=0;q<3;q++){//循环分别对R、G、B、三个数值进行池化
-                 temp1=frame.data[i*frame.linesize+j*3+q]>frame.data[i*frame.linesize+j*3+q+3]?
-                 frame.data[i*frame.linesize+j*3+q]:frame.data[i*frame.linesize+j*3+q+3];
-                 temp2=frame.data[(i+1)*frame.linesize+j*3+q]>frame.data[(i+1)*frame.linesize+j*3+q+3]?
-                 frame.data[(i+1)*frame.linesize+j*3+q]:frame.data[(i+1)*frame.linesize+j*3+q+3];
-                 temp3 = temp1 > temp2 ? temp1 : temp2;
-                 output.data[i/2*output.linesize+j+q]=temp3;
+
+//边界待处理(补0)
+Frame resize_max(Frame frame,const int fitter,const int stride){//池化的窗口大小和步长
+    Frame output;//定义池化后的图像
+    int MAX_R,MAX_G,MAX_B;
+    output.height=frame.height/fitter;
+    if(frame.height%fitter!=0) output.height++;//池化后图片height
+
+    output.width=(frame.width-fitter)/stride+1;//公式计算池化后图片的width
+    if(frame.width%fitter!=0) output.width++;
+    
+    output.linesize=output.width*3+1;//池化后的linesize
+
+    for(int i=0;i<frame.height;i+=fitter){//i标记行数
+        for(int j=1;j<frame.width;j+=stride){//j跟踪每一行的元素,**从1开始**
+        //遍历图像
+
+            MAX_R=0;
+            MAX_G=0;
+            MAX_B=0;
+            //初始化
+
+            for(int step_h=0;step_h<fitter;step_h++){
+                for(int step_w=0;step_w<stride;step_w++){
+                    //遍历窗口
+                    int temp;
+                    
+                    //边界处理
+                    if(j*stride+step_w>frame.linesize) break;//横向越界跳出循环
+                    if(i*fitter>frame.height) temp=0;//纵向越界补0;
+                    else temp=frame.data[(i*output.height+step_h)*frame.linesize+j*stride+step_w];
+                    //frame.data[i*output.height+step_h][j*stride+step_w];
+
+                    switch (step_w%3)//判断是哪个分量
+                    {
+                    case 0:
+                        if(temp>MAX_B) MAX_B=temp;
+                        break;
+                    case 1:
+                        if(temp>MAX_R) MAX_R=temp;
+                        break;
+                    case 2:
+                        if(temp>MAX_G) MAX_G=temp;
+                        break;
+                    default:
+                        break;
+                    }
+                }
             }
+            output.data[i*output.linesize+j+1]=MAX_R;
+            output.data[i*output.linesize+j+2]=MAX_G;
+            output.data[i*output.linesize+j+3]=MAX_B; 
             
         }
     }
 }
 
-Frame resize_max(Frame frame,int level){
+Frame resize_ave(Frame frame,int level){
 
 }
 
@@ -93,12 +129,12 @@ int main(int argc, char *argv[]){
 
     int Have_color=0;
 
-    int stride=2;
-    int fitter=2;
+    // int stride=2;
+    // int fitter=2;
     //设置默认的池化数值.
 
-    // int rheight=5;
-    // int rwidth=5;
+    int rheight=5;
+    int rwidth=5;
     if (argc < 2) {
         printf("Usage: %s <option>\n", argv[0]);
         printf("Options:\n");
@@ -128,8 +164,8 @@ int main(int argc, char *argv[]){
                 printf("%s","输入错误,长宽变量缺失");
                 return -1;
             }
-            fitter=*argv[i++]-'0';
-            stride=*argv[i++]-'0';
+            // fitter=*argv[i++]-'0';
+            // stride=*argv[i++]-'0';
             //调整池化相关参数
             
         }
@@ -145,6 +181,7 @@ int main(int argc, char *argv[]){
     int n= get_total_frames();
     printf("total:%d\n",n);
 
+//解码视频
     Frame frame[3];//测试3张
     for(int i=0 ; i<3 ;i++){
         frame[i]=decoder_get_frame();

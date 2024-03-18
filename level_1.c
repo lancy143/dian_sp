@@ -1,23 +1,26 @@
 #include <stdio.h>
+#include <unistd.h>
+#include <time.h>
 #include "xargparse.h"
 #include <libavformat/avformat.h>  
 #include <libavcodec/avcodec.h>
 #include "video_decoder.h"
 
-//边界待处理(补0)
+//很有问题的池化
 Frame resize_max(Frame frame,const int fitter,const int stride){//池化的窗口大小和步长
     Frame output;//定义池化后的图像
+    //printf("**here**\n");
     int MAX_R,MAX_G,MAX_B;
-    output.height=frame.height/fitter;
+    output.height=(frame.height-fitter)/stride+1;
     if(frame.height%fitter!=0) output.height++;//池化后图片height
 
-    output.width=(frame.width-fitter)/stride+1;//公式计算池化后图片的width
+    output.width=(frame.width-1-fitter)/stride+1;//公式计算池化后图片的width
     if(frame.width%fitter!=0) output.width++;
     
     output.linesize=output.width*3+1;//池化后的linesize
-
-    for(int i=0;i<frame.height;i+=fitter){//i标记行数
-        for(int j=1;j<frame.width;j+=stride){//j跟踪每一行的元素,**从1开始**
+    output.data = (char*)malloc(output.linesize*output.height * sizeof(char));
+    for(int i=0;i<output.height;i++){//i标记行数
+        for(int j=1;j<=output.width;j++){//j跟踪每一行的元素,**从1开始**
         //遍历图像
 
             MAX_R=0;
@@ -26,51 +29,58 @@ Frame resize_max(Frame frame,const int fitter,const int stride){//池化的窗�
             //初始化
 
             for(int step_h=0;step_h<fitter;step_h++){
-                for(int step_w=0;step_w<stride;step_w++){
+                for(int step_w=0;step_w<fitter*3;step_w++){
                     //遍历窗口
                     int temp;
-                    
+                 
                     //边界处理
-                    if(j*stride+step_w>frame.linesize) break;//横向越界跳出循环
-                    if(i*fitter>frame.height) temp=0;//纵向越界补0;
-                    else temp=frame.data[(i*output.height+step_h)*frame.linesize+j*stride+step_w];
-                    //frame.data[i*output.height+step_h][j*stride+step_w];
+                    if(j*stride+step_w>=frame.linesize) break;//横向越界跳出循环
+                    if(i*stride>=frame.height) temp=0;//纵向越界补0;
+                    else temp=frame.data[(i*stride+step_h)*frame.linesize+j*stride+step_w];
+                    //frame.data[i*stride+step_h][j*stride+step_w];
 
-                    switch (step_w%3)//判断是哪个分量
+                    switch ((step_w+1)%3)//判断是哪个分量
                     {
                     case 0:
                         if(temp>MAX_B) MAX_B=temp;
+                        //printf("B");
                         break;
                     case 1:
                         if(temp>MAX_R) MAX_R=temp;
+                        //printf("R");
                         break;
                     case 2:
                         if(temp>MAX_G) MAX_G=temp;
+                        //printf("G");
                         break;
                     default:
                         break;
                     }
                 }
             }
-            output.data[i*output.linesize+j+1]=MAX_R;
-            output.data[i*output.linesize+j+2]=MAX_G;
-            output.data[i*output.linesize+j+3]=MAX_B; 
+
+            output.data[i*output.linesize+j]=MAX_R;
+            output.data[i*output.linesize+j+1]=MAX_G;
+            output.data[i*output.linesize+j+2]=MAX_B; 
+            printf("*R:%d,G:%d,B:%d\n",MAX_R,MAX_G,MAX_B);
+            //printf("R:%c,G:%c,B:%c\n",output.data[i*output.linesize+j],output.data[i*output.linesize+j+1],output.data[i*output.linesize+j+2]);
             
         }
     }
+    return output;
 }
 
+//等第一个写好了再直接改的池化
 Frame resize_ave(Frame frame,int level){
-
 }
 
-void printf_rgb(Frame frame,int size_h)
+void printf_rgb(Frame frame)
 {
     int R,G,B,grey;//暂存
     int a=0,line=0;
-    int size_v=size_h*frame.height/frame.width;
-        for(line=0;line<frame.height;line+=size_v){
-            for(a=0;a<frame .linesize;a+=size_h){
+    //int size_v=size_h*frame.height/frame.width;
+        for(line=0;line<frame.height;line++){
+            for(a=0;a<frame .linesize;a++){
                 R=frame.data[(frame.linesize)*line+a+1]-'0';
                 G=frame.data[(frame.linesize)*line+a+2]-'0';
                 B=frame.data[(frame.linesize)*line+a+3]-'0';
@@ -82,119 +92,165 @@ void printf_rgb(Frame frame,int size_h)
        }
 }
 
-//不知道为什么但是灰度图的打印不是很稳定
-void print_grey(Frame frame ,int size_h){
+//不是很稳定
+void print_grey(Frame frame){
     int a=0,line=0;
     int R,G,B,grey;
-    int size_v=2*(size_h*frame.height/frame.width);
-    for(line=0;line<frame.height;line+=size_v){
-            for(a=0;a<frame .linesize;a+=size_h){
-                R=frame.data[(frame.linesize)*line+a+1]-'0';
-                G=frame.data[(frame.linesize)*line+a+2]-'0';
-                B=frame.data[(frame.linesize)*line+a+3]-'0';
-
+   char butter[(frame.height/5+1)*(frame.linesize/5+1)];
+    //char butter[frame.height*frame.linesize];
+    //int size_v=2*(size_h*frame.height/frame.width);
+    for(line=0;line<frame.height;line+=5){
+            for(a=0;a<frame .linesize;a+=5){
+                R=frame.data[(frame.linesize)*line+a+1];
+                G=frame.data[(frame.linesize)*line+a+2];
+                B=frame.data[(frame.linesize)*line+a+3];
+                //printf("*R:%d,G:%d,B:%d\n",R,G,B);//
                 grey=(R*76 + G*150 + B*30) >> 8;
                 if(grey<20)
-                    printf(" ");
-                else if(grey<40) printf(".");
-                else if(grey<127) printf(":");
-                else if(grey<200) printf("#");
-                else printf("@");
+                    strcat(butter," ") ;  
+                else if(grey<40) strcat(butter,".");
+                else if(grey<80) strcat(butter,"-");
+                else if(grey<127) strcat(butter,":");
+                else if(grey<200) strcat(butter,"#");
+                else strcat(butter,"@");
+                
                 }
-            printf("\n");
+            //printf("\n");
+            strcat(butter,"\n");
+            //建立缓存区（很有炸的潜质现在）
        }
-    
+       strcat(butter,"\0");
+    printf("%s",butter);
+    //free(butter);
 }
 
+int main(int argc, const char **argv){
 
-int main(int argc, char *argv[]){
-
-    //一个关于颜色的测试
-    //printf("\033[44m█\033[0m\n"); // \033[ 是开始ANSI转义序列的标记，37是白色前景色，41是红色背景色，0是重置所有属性到默认值  
-    //printf_red("█");
+    /*//一个关于颜色的测试
+    printf("\033[44m█\033[0m\n"); // \033[ 是开始ANSI转义序列的标记，37是白色前景色，41是红色背景色，0是重置所有属性到默认值  
+    printf_red("█");
     char *colorterm = getenv("COLORTERM");
     if (colorterm != NULL && strcmp(colorterm, "truecolor") == 0) {
         printf("终端支持True Color\n");
     } else {
         printf("终端不支持True Color\n");
     }
+    */
 
 
-    if(decoder_init("/home/lancyx/dian/dragon.mp4")==0) //成功时返回 0 ，失败时返回 -1 
+//命令行编写
+   int Have_color=0;//默认灰度图
+
+    int stride=2;
+    int fitter=2;//设置默认的池化数值.
+
+    char *str, *filepath="/home/lancyx/dian/dragon.mp4";
+    int *resize;
+    argparse_option options[] = {
+        //(bind, short_name, long_name, help_info, append_info, name)
+        XBOX_ARG_BOOLEAN(NULL, "-h", "--help", "show help information", NULL, "help"),
+        XBOX_ARG_BOOLEAN(NULL, "-v", "--version", "show version", NULL, "version"),
+        //帮助信息和版本信息
+
+        XBOX_ARG_BOOLEAN(NULL,"-c","-color","RGBorGrey",NULL,"color"),
+        //RGB or Grey（默认灰度图）
+
+        XBOX_ARG_INTS_GROUP(&resize, "-r", "--resize", "resizebypooling", NULL, "resize"),
+        //调整池化窗口大小（默认fitter=2，stride=2）
+        
+        XBOX_ARG_STR_GROUP(&filepath, "-f", NULL, "filepath", NULL, "filepath"),
+        //选择要播放的文件的路径（含默认值）       
+       
+        XBOX_ARG_END()
+    };
+    
+    XBOX_argparse parser;
+    XBOX_argparse_init(&parser, options, 0);
+    XBOX_argparse_describe(&parser,
+                           "main",
+                           "\nA brief description of what the program does and how it works.",
+                           "\nAdditional description of the program after the description of the arguments.");
+    XBOX_argparse_parse(&parser, argc, argv);
+    if (XBOX_ismatch(&parser, "help")) {
+        XBOX_argparse_info(&parser);
+        return 0;
+    }
+    if (XBOX_ismatch(&parser, "version")) {
+        printf("v0.0.1\n");
+        return 0;
+    }
+
+    //颜色
+    if (XBOX_ismatch(&parser, "color")) {
+        Have_color=1;
+    }
+
+    //resize
+    if (XBOX_ismatch(&parser, "resize")){
+        int Is_legal = XBOX_ismatch(&parser, "resize");
+        if(Is_legal!=2){
+            printf("不合法输入");
+            return -1;
+        }
+        fitter=resize[0];
+        stride=resize[1];
+    }       
+    XBOX_free_argparse(&parser);
+//命令行编写结束
+
+    if(decoder_init(filepath)==0) //成功时返回 0 ，失败时返回 -1 
         printf("Find it!\n");
     else{
         printf("未找到视频流\n");
         return -1;
     }
 
-    int Have_color=0;
-
-    // int stride=2;
-    // int fitter=2;
-    //设置默认的池化数值.
-
-    int rheight=5;
-    int rwidth=5;
-    if (argc < 2) {
-        printf("Usage: %s <option>\n", argv[0]);
-        printf("Options:\n");
-        printf("  -h, --help        Display this help message and exit\n");
-        printf("  -V, --version     Display version information and exit\n");
-        //return 1; // 返回非零值表示错误
-    }
-
-    // 处理命令行参数
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            printf("Usage: %s [options]\n", argv[0]);
-            printf("Options:\n");
-            printf("  -h, --help        Display this help message and exit\n");
-            printf("  -V, --version     Display version information and exit\n");
-            return 0; // 成功执行帮助命令，返回0
-        } 
-        else if (strcmp(argv[i], "-V") == 0 || strcmp(argv[i], "--version") == 0) {
-            printf("MyProgram Version 1.0 (WSL Edition)\n");
-            return 0; // 成功执行版本命令，返回0
-        } 
-        else if(strcmp(argv[i], "-c") == 0||strcmp(argv[i], "--color") == 0){
-            Have_color=1;
-        }
-        else if(strcmp(argv[i],"-r")==0||strcmp(argv[i],"--resize")==0){
-            if(argc<i+2){
-                printf("%s","输入错误,长宽变量缺失");
-                return -1;
-            }
-            // fitter=*argv[i++]-'0';
-            // stride=*argv[i++]-'0';
-            //调整池化相关参数
-            
-        }
-        
-        else {
-            printf("Unknown option: %s\n", argv[i]);
-            return 1; // 未知选项，返回错误
-        }
-    }
-
-
-
     int n= get_total_frames();
     printf("total:%d\n",n);
 
 //解码视频
-    Frame frame[3];//测试3张
-    for(int i=0 ; i<3 ;i++){
+    Frame frame[n+1];//读取全部
+
+    // char progress[101];
+    // int count_progress=100;//进度条编写
+    // int i_progress=0;
+    // memset (progress,'\0',sizeof(progress));
+    clock_t start,end;
+    for(int i=0 ; i<n ;i++){
+        start = clock();
+        for(int j=0;j<100;j++){
+            Frame temp=decoder_get_frame();
+        }
+        
         frame[i]=decoder_get_frame();
-        printf("The picture%d :\nheight:%d\nwidth:%d\nline:%d\ndata:\n"
-        ,i , frame[i].height , frame[i].width,frame[i].linesize);
+        print_grey(frame[i]);
+        end = clock();
+        sleep(((double) (end - start)) / CLOCKS_PER_SEC);
+
+        // if(i%(n/100)==0){
+        //     printf("[%-100s\r]",progress);
+        //     fflush(stdout);
+        //     progress[i_progress++]='=';
+        // }
+
+        system("clear");
         
+        //printf("Present index:%d",get_frame_index());
+        // printf("The picture%d :\nheight:%d\nwidth:%d\nline:%d\ndata:\n"
+        // ,i , frame[i].height , frame[i].width,frame[i].linesize);//打印读取到的视频的相关信息       
     }
+
+    //int i;
+    for(int i=0;i<n;i++){ 
+        //system("clear");//打印的速度赶不上清屏的速度,还没出现就润了
         
-    for(int i=0;i<3;i++){  
-        if(Have_color)    printf_rgb(frame[i],rwidth);
-        else print_grey(frame[i],rwidth);
-        printf("\n");
+        //Frame temp=resize_max(frame[i],fitter,stride);//max pooling
+        // if(Have_color)    printf_rgb(temp);
+        // else print_grey(temp);
+        print_grey(frame[i]);
+        printf("finish\n");
     }
+    
     decoder_close();
 
     

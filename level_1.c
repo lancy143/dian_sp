@@ -81,9 +81,9 @@ void printf_rgb(Frame frame)
     //int size_v=size_h*frame.height/frame.width;
         for(line=0;line<frame.height;line++){
             for(a=0;a<frame .linesize;a++){
-                R=frame.data[(frame.linesize)*line+a+1]-'0';
-                G=frame.data[(frame.linesize)*line+a+2]-'0';
-                B=frame.data[(frame.linesize)*line+a+3]-'0';
+                R=frame.data[(frame.linesize)*line+a+1];
+                G=frame.data[(frame.linesize)*line+a+2];
+                B=frame.data[(frame.linesize)*line+a+3];
                 //printf("\033[38;2;%d;%d;%dm█\033[0m", R, G, B); //理论上可以打出rgb颜色的代码 
                 int color_index = 16 + 36 * (R / 51) + 6 * (G / 51) + (B  / 51);   
                 printf("\033[38;5;%dm█\033[0m", color_index);
@@ -140,7 +140,7 @@ int main(int argc, const char **argv){
 
 //命令行编写
    int Have_color=0;//默认灰度图
-
+    int frame_skipping=5;//默认帧率
     int stride=2;
     int fitter=2;//设置默认的池化数值.
 
@@ -152,10 +152,11 @@ int main(int argc, const char **argv){
         XBOX_ARG_BOOLEAN(NULL, "-v", "--version", "show version", NULL, "version"),
         //帮助信息和版本信息
 
-        XBOX_ARG_BOOLEAN(NULL,"-c","-color","RGBorGrey",NULL,"color"),
+        XBOX_ARG_BOOLEAN(NULL,"-c","-color","shoe RGB or Grey",NULL,"color"),
         //RGB or Grey（默认灰度图）
 
-        XBOX_ARG_INTS_GROUP(&resize, "-r", "--resize", "resizebypooling", NULL, "resize"),
+        XBOX_ARG_INT_GROUP(&frame_skipping,"s","--skip","fram skip",NULL,"skip"),
+        XBOX_ARG_INTS_GROUP(&resize, "-r", "--resize", "resize by pooling", NULL, "resize"),
         //调整池化窗口大小（默认fitter=2，stride=2）
         
         XBOX_ARG_STR_GROUP(&filepath, "-f", NULL, "filepath", NULL, "filepath"),
@@ -209,21 +210,25 @@ int main(int argc, const char **argv){
     printf("total:%d\n",n);
 
 //解码视频
-    Frame frame[n+1];//读取全部
+    Frame frame;//读取全部
 
     // char progress[101];
     // int count_progress=100;//进度条编写
     // int i_progress=0;
     // memset (progress,'\0',sizeof(progress));
     clock_t start,end;
-    for(int i=0 ; i<n ;i++){
+    while(1){
         start = clock();
-        for(int j=0;j<100;j++){
+        for(int j=0;j<frame_skipping;j++){
             Frame temp=decoder_get_frame();
-        }
+            if(temp.data==NULL) break;
+        }//减去一些帧
+        frame=decoder_get_frame();
+        if(frame.data==NULL) break;//循环终止
+        if(Have_color)    printf_rgb(frame);
+        else print_grey(frame);
         
-        frame[i]=decoder_get_frame();
-        print_grey(frame[i]);
+        //print_grey(frame[i]);
         end = clock();
         sleep(((double) (end - start)) / CLOCKS_PER_SEC);
 
@@ -233,7 +238,7 @@ int main(int argc, const char **argv){
         //     progress[i_progress++]='=';
         // }
 
-        system("clear");
+        //system("clear");
         
         //printf("Present index:%d",get_frame_index());
         // printf("The picture%d :\nheight:%d\nwidth:%d\nline:%d\ndata:\n"
@@ -241,15 +246,14 @@ int main(int argc, const char **argv){
     }
 
     //int i;
-    for(int i=0;i<n;i++){ 
-        //system("clear");//打印的速度赶不上清屏的速度,还没出现就润了
+    // for(int i=0;i<1;i++){ 
+    //     //system("clear");//打印的速度赶不上清屏的速度,还没出现就润了
+    //     Frame temp=frame[i];
+    //     //Frame temp=resize_max(frame[i],fitter,stride);//max pooling
         
-        //Frame temp=resize_max(frame[i],fitter,stride);//max pooling
-        // if(Have_color)    printf_rgb(temp);
-        // else print_grey(temp);
-        print_grey(frame[i]);
-        printf("finish\n");
-    }
+    //     //print_grey(frame[i]);
+    //     printf("finish\n");
+    // }
     
     decoder_close();
 
